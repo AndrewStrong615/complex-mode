@@ -14,53 +14,147 @@ const BAND = {
   },
 } as const
 
+const SEND = 'mcp__complex-mode__send_message'
+const READ = 'mcp__complex-mode__read_messages'
+
 async function drain(stream: AsyncIterable<unknown> & { result: Promise<unknown> }) {
   for await (const _ of stream);
   return stream.result
 }
 
 const STEP = { turnId: 't1', index: 0, model: 'claude-haiku-5-5', effort: 'medium', messageCount: 1 } as const
+const TYPED = { text: 'refactor the parser', wait: false, origin: { kind: 'sdk' } } as const
 
-test('off changes nothing; on forces the models and adds the workflow note', async ($, on) => {
-  const sent: { model: string; effort?: unknown; agentId?: string }[] = []
-  const contexts: (readonly string[] | undefined)[] = []
+type Recorder = {
+  sent: { model: string; effort?: unknown; agentId?: string }[]
+  contexts: (readonly string[] | undefined)[]
+  tools: string[]
+  store: Map<string, unknown>
+}
 
-  // Stand in for the engine beneath the mod: record what each request and prompt went out with.
+// Stand in for the engine beneath the mod.
+type TestOn = Parameters<Extract<Parameters<typeof test>[1], (...args: never[]) => unknown>>[1]
+
+function engine(on: TestOn): Recorder {
+  const r: Recorder = { sent: [], contexts: [], tools: [], store: new Map() }
   on('turn.step', async function* (_, e) {
-    sent.push({ model: e.model, effort: e.effort, agentId: e.agentId })
-    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: null, usage: null }
+    r.sent.push({ model: e.model, effort: e.effort, agentId: e.agentId })
+    const model = e.model.includes('opus') ? 'claude-opus-5-5' : e.model
+    return {
+      turnId: e.turnId,
+      index: e.index,
+      answer: '',
+      toolUses: [],
+      stopReason: null,
+      usage: { model, input_tokens: 1000, output_tokens: 500, cache_creation_input_tokens: 0, cache_read_input_tokens: 9000 },
+    }
   })
   on('prompt.submit', (_, e) => {
-    contexts.push(e.context)
+    r.contexts.push(e.context)
     return { drop: 'captured by the test' }
   })
-  const prompt = { text: 'refactor the parser', wait: false, origin: { kind: 'composer' } } as const
+  on('tool.register', (_, e) => {
+    r.tools.push(e.name)
+    return { value: { tool: `mcp__complex-mode__${e.name}` } }
+  })
+  on('command.register', () => ({ value: { command: 'complex' } }))
+  on('store.get', (_, e) => ({ value: r.store.get(e.key) }))
+  on('store.set', (_, e) => {
+    r.store.set(e.key, e.value)
+    return { value: undefined }
+  })
+  on('agent.list', () => ({
+    value: [{ id: 'a1', description: 'Map the parser', type: 'general-purpose', status: 'running' }],
+  }))
+  on('tool.call', () => ({ result: 'ok' }))
 
-  // Off: untouched.
+  return r
+}
+
+test('off changes nothing and adds no tools', async ($, on) => {
+  const r = engine(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true }).catch(() => {})
+
   await drain($.turn.step(STEP))
-  await $.prompt.submit(prompt).catch(() => {})
-  expect(sent).toEqual([{ model: 'claude-haiku-5-5', effort: 'medium', agentId: undefined }])
-  expect(contexts).toEqual([undefined])
+  await $.prompt.submit(TYPED).catch(() => {})
+  expect(r.sent).toEqual([{ model: 'claude-haiku-5-5', effort: 'medium', agentId: undefined }])
+  expect(r.contexts).toEqual([undefined])
+  expect(r.tools).toEqual([])
 
-  // Turn it on from the band, on the desktop surface.
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  expect((await ui.find({ text: /○ Off/ }))).toBeDefined()
+  expect(await ui.find({ text: /○ Off/ })).toBeDefined()
+  expect(await ui.find({ key: 'complex-once' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('on forces the models, tallies usage, and notes only prompts the person sent', async ($, on) => {
+  const r = engine(on)
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   await ui.press({ key: 'complex-toggle' })
-  expect((await ui.find({ text: /● On/ }))).toBeDefined()
+  expect(await ui.find({ text: /● On/ })).toBeDefined()
+  expect(r.tools).toEqual(['send_message', 'read_messages'])
 
   await drain($.turn.step(STEP))
   await drain($.turn.step({ ...STEP, agentId: 'a1' }))
-  await $.prompt.submit(prompt).catch(() => {})
-  expect(sent.slice(1)).toEqual([
+  expect(r.sent).toEqual([
     { model: 'claude-opus-5-5', effort: 'xhigh', agentId: undefined },
     { model: 'claude-sonnet-5-5', effort: 'medium', agentId: 'a1' },
   ])
-  expect(contexts[1]?.[0]).toContain('Workflow tool')
+  expect((await ui.find({ text: /Used this session/ }))?.text).toContain('Opus 2k · Sonnet 2k')
 
-  // And off again: back to untouched.
+  await $.prompt.submit(TYPED).catch(() => {})
+  await $.prompt.submit({ ...TYPED, origin: { kind: 'task-notification' } }).catch(() => {})
+  expect(r.contexts[0]?.[0]).toContain('Workflow tool')
+  expect(r.contexts[1]).toBeUndefined()
+
   await ui.press({ key: 'complex-toggle' })
   await drain($.turn.step(STEP))
-  expect(sent.at(-1)).toEqual({ model: 'claude-haiku-5-5', effort: 'medium', agentId: undefined })
+  expect(r.sent.at(-1)).toEqual({ model: 'claude-haiku-5-5', effort: 'medium', agentId: undefined })
+  await ui.unmount()
+})
+
+test('once runs for one prompt and its work, then turns off at the next prompt', async ($, on) => {
+  const r = engine(on)
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  await ui.press({ key: 'complex-once' })
+  expect(await ui.find({ text: /your next prompt/ })).toBeDefined()
+
+  await $.prompt.submit(TYPED).catch(() => {})
+  expect(r.contexts[0]?.[0]).toContain('Complex-task mode is ON')
+  await $.prompt.submit({ ...TYPED, origin: { kind: 'task-notification' } }).catch(() => {})
+  await drain($.turn.step(STEP)) // the background work goes on, still forced
+  expect(r.sent.at(-1)?.model).toBe('claude-opus-5-5')
+
+  await $.prompt.submit(TYPED).catch(() => {})
+  expect(r.contexts[2]).toBeUndefined()
+  expect(await ui.find({ text: /○ Off/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('agents message each other through the mailbox, delivered with tool results', async ($, on) => {
+  engine(on)
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  await ui.press({ key: 'complex-toggle' })
+
+  // The subagent tells the orchestrator; it arrives with the orchestrator's next tool result.
+  const sent = await $.tool.call({ tool: SEND, to: 'orchestrator', text: 'parser uses a hand-rolled lexer', agentId: 'a1' })
+  expect(sent.deny).toBeUndefined()
+  const bash = await $.tool.call({ tool: 'Bash', command: 'ls' })
+  expect(bash.deny === undefined ? bash.context?.join('\n') : '').toContain('[from Map the parser] parser uses a hand-rolled lexer')
+
+  // The orchestrator answers everyone; the subagent reads it.
+  await $.tool.call({ tool: SEND, to: 'all', text: 'keep the lexer, change the AST' })
+  const inbox = await $.tool.call({ tool: READ, agentId: 'a1' })
+  expect(inbox.deny === undefined ? String(inbox.result) : '').toContain('keep the lexer, change the AST')
+  expect(inbox.deny === undefined ? String(inbox.result) : '').toContain('a1: Map the parser')
+
+  // Delivered once only.
+  const again = await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1' })
+  expect(again.deny === undefined ? again.context : ['x']).toBeUndefined()
+
+  // Off closes the mailbox.
+  await ui.press({ key: 'complex-toggle' })
+  expect((await $.tool.call({ tool: SEND, to: 'all', text: 'hi' })).deny).toContain('off')
   await ui.unmount()
 })
 

@@ -6,10 +6,19 @@ A Claude Code mod that adds a **🧠 Complex mode** toggle above the prompt box,
 
 - **On:** every request in the main conversation goes to Opus 5.5 at extra-high (`xhigh`) effort, and every
   subagent runs on Sonnet 5.5. Each prompt you send also carries a short note asking Claude to orchestrate
-  real work with the Workflow tool (quick questions still just get answered).
-- **Off:** nothing changes. It starts off in every new session.
-- While it's on, a small line under the toggle shows the model each request was actually answered by, so you
-  can see it working.
+  real work with the Workflow tool (quick questions still just get answered). Automatic prompts (background
+  task notices, scheduled runs, other sessions) don't get the note.
+- **Once:** on for your next prompt and all the work it starts, background workflows included; it switches
+  itself off when you send the prompt after that.
+- **Off:** nothing changes. It starts off in every new session, unless you pick **Keep on in new sessions**.
+- **Agents can talk:** the orchestrator and its subagents share a mailbox (`send_message` to `orchestrator`,
+  `all`, or an agent id, and `read_messages`). New messages also arrive by themselves with an agent's next
+  tool result. While the orchestrator waits on a running Workflow it reads nothing until the workflow
+  returns; for live back-and-forth it runs background subagents. The tools are added the first time you
+  turn the mode on in a session, and refuse calls while it's off.
+- **See what it's doing:** the card shows tokens used this session by model (cache reads not counted), how
+  many messages agents have exchanged, and the model each request was actually answered by.
+- `/complex`, `/complex on`, `/complex off`, `/complex once` toggle it from the keyboard.
 
 Works in the terminal and in the Claude desktop app. It shares the band above the prompt box with other mods
 (such as prompt-improver) without hiding them.
