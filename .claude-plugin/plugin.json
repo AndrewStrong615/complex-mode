@@ -1,0 +1,6 @@
+{
+  "name": "complex-mode",
+  "version": "0.1.0",
+  "description": "A toggle above the prompt box: when on, Opus 5.5 at xhigh effort orchestrates a workflow and every subagent runs on Sonnet 5.5",
+  "types": "./types/index.d.ts"
+}

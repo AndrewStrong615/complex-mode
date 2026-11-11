@@ -1,0 +1,5 @@
+{
+  "name": "complex-mode",
+  "owner": { "name": "AndrewStrong615" },
+  "plugins": [{ "name": "complex-mode", "source": "./" }]
+}
