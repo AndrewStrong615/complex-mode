@@ -208,14 +208,17 @@ export const register: Register = on => {
     const below = await next(e) // keep whatever another mod (prompt-improver) draws here
     const { Box, Button, Text } = $.ui.resolve(e)
 
+    // Shared design with prompt-improver: idle is one quiet line with no card; otherwise one flat card (title
+    // row with status right, subtle body, all actions right-aligned). A lasting state (this card) gets a
+    // neutral border; an orange border is kept for a card that waits on the person (prompt-improver's).
     if (current === 'off') {
       return (
         <Box flexDirection="column" gap={1}>
-          <Box flexDirection="row" alignItems="center" justifyContent="space-between" gap={2}>
+          <Box flexDirection="row" alignItems="center" justifyContent="space-between" gap={2} paddingX={2}>
             <Text size="footnote" color="subtle">
-              🧠 Complex mode <Text color="subtle">○ Off</Text>
+              🧠 Complex mode · Off
             </Text>
-            <Box flexDirection="row" gap={1}>
+            <Box flexDirection="row" alignItems="center" gap={1}>
               <Button key="complex-once" label="Once" onPress={() => setMode($, 'once')} />
               <Button key="complex-toggle" variant="primary" label="Turn on" onPress={() => setMode($, 'on')} />
             </Box>
@@ -230,43 +233,47 @@ export const register: Register = on => {
     const used = await read($, usage)
     const box = await read($, mailbox)
     const keepOn = (await $.store.get(KEEP_ON)) === true
-    const isOnce = current === 'once' || current === 'once-active'
+    const status = current === 'once' ? 'Once · next prompt' : current === 'once-active' ? 'Once · this task' : 'On'
+
+    // One meta line, only the parts that have something to say.
+    const model = (s: string | null) => (s === null ? '—' : s.replace(/^claude-/, ''))
+    const meta = [
+      used.opus > 0 || used.sonnet > 0
+        ? `${[used.opus > 0 ? `Opus ${short(used.opus)}` : null, used.sonnet > 0 ? `Sonnet ${short(used.sonnet)}` : null]
+            .filter(part => part !== null)
+            .join(' · ')} tokens`
+        : null,
+      box.length > 0 ? `${box.length} message${box.length === 1 ? '' : 's'}` : null,
+      main !== null || sub !== null ? `last ${model(main)} / ${model(sub)}` : null,
+    ]
+      .filter(part => part !== null)
+      .join(' · ')
+
+    const about =
+      current === 'once'
+        ? 'Opus 5.5 + Sonnet 5.5 subagents for your next prompt and its work'
+        : current === 'once-active'
+          ? 'Opus 5.5 + Sonnet 5.5 subagents until you send your next prompt'
+          : 'Opus 5.5 orchestrates · Sonnet 5.5 subagents · shared mailbox'
 
     return (
       <Box flexDirection="column" gap={1}>
-        <Box
-          borderStyle="round"
-          borderColor="claude"
-          paddingX={1}
-          flexDirection="row"
-          alignItems="center"
-          justifyContent="space-between"
-          gap={2}
-        >
-          <Box flexDirection="column" flexGrow={1} flexShrink={1}>
-            <Text weight="semibold">
-              🧠 Complex mode{' '}
-              <Text color="success" weight="medium">
-                {isOnce ? (current === 'once' ? '◐ Once · your next prompt' : '◐ Once · this task') : '● On'}
-              </Text>
+        <Box borderStyle="round" borderColor="subtle" paddingX={2} flexDirection="column" gap={1}>
+          <Box flexDirection="row" alignItems="center" justifyContent="space-between" gap={2}>
+            <Text weight="semibold">🧠 Complex mode</Text>
+            <Text size="footnote" weight="medium" color="claude">
+              {status}
             </Text>
-            <Text size="footnote" color="subtle">
-              Opus 5.5 (extra-high effort) orchestrates · subagents on Sonnet 5.5 · shared mailbox
-            </Text>
-            {(used.opus > 0 || used.sonnet > 0) && (
-              <Text size="caption" color="subtle">
-                Used this session: Opus {short(used.opus)} · Sonnet {short(used.sonnet)} tokens
-                {box.length > 0 ? ` · ${box.length} message${box.length === 1 ? '' : 's'} between agents` : ''}
-              </Text>
-            )}
-            {(main !== null || sub !== null) && (
-              <Text size="caption" color="subtle" mono>
-                last request {main ?? '—'} · last subagent {sub ?? '—'}
-              </Text>
-            )}
           </Box>
-          <Box flexDirection="column" alignItems="flex-end" gap={1}>
-            <Button key="complex-toggle" label="Turn off" onPress={() => setMode($, 'off')} />
+          <Text size="footnote" color="subtle">
+            {about}
+          </Text>
+          {meta.length > 0 && (
+            <Text size="caption" color="subtle" wrap="truncate-end">
+              {meta}
+            </Text>
+          )}
+          <Box flexDirection="row" alignItems="center" justifyContent="flex-end" gap={1}>
             {current === 'on' && (
               <Button
                 key="complex-keep"
@@ -279,6 +286,7 @@ export const register: Register = on => {
                 }}
               />
             )}
+            <Button key="complex-toggle" label="Turn off" onPress={() => setMode($, 'off')} />
           </Box>
         </Box>
         {below}

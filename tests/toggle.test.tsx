@@ -82,7 +82,7 @@ test('off changes nothing and adds no tools', async ($, on) => {
   expect(r.tools).toEqual([])
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  expect(await ui.find({ text: /○ Off/ })).toBeDefined()
+  expect(await ui.find({ text: /Complex mode · Off/ })).toBeDefined()
   expect(await ui.find({ key: 'complex-once' })).toBeDefined()
   await ui.unmount()
 })
@@ -91,7 +91,7 @@ test('on forces the models, tallies usage, and notes only prompts the person sen
   const r = engine(on)
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   await ui.press({ key: 'complex-toggle' })
-  expect(await ui.find({ text: /● On/ })).toBeDefined()
+  expect(await ui.find({ text: /^On$/ })).toBeDefined()
   expect(r.tools).toEqual(['send_message', 'read_messages'])
 
   await drain($.turn.step(STEP))
@@ -100,7 +100,7 @@ test('on forces the models, tallies usage, and notes only prompts the person sen
     { model: 'claude-opus-5-5', effort: 'xhigh', agentId: undefined },
     { model: 'claude-sonnet-5-5', effort: 'medium', agentId: 'a1' },
   ])
-  expect((await ui.find({ text: /Used this session/ }))?.text).toContain('Opus 2k · Sonnet 2k')
+  expect((await ui.find({ text: /tokens/ }))?.text).toContain('Opus 2k · Sonnet 2k tokens')
 
   await $.prompt.submit(TYPED).catch(() => {})
   await $.prompt.submit({ ...TYPED, origin: { kind: 'task-notification' } }).catch(() => {})
@@ -117,7 +117,7 @@ test('once runs for one prompt and its work, then turns off at the next prompt',
   const r = engine(on)
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   await ui.press({ key: 'complex-once' })
-  expect(await ui.find({ text: /your next prompt/ })).toBeDefined()
+  expect(await ui.find({ text: /Once · next prompt/ })).toBeDefined()
 
   await $.prompt.submit(TYPED).catch(() => {})
   expect(r.contexts[0]?.[0]).toContain('Complex-task mode is ON')
@@ -127,7 +127,7 @@ test('once runs for one prompt and its work, then turns off at the next prompt',
 
   await $.prompt.submit(TYPED).catch(() => {})
   expect(r.contexts[2]).toBeUndefined()
-  expect(await ui.find({ text: /○ Off/ })).toBeDefined()
+  expect(await ui.find({ text: /Complex mode · Off/ })).toBeDefined()
   await ui.unmount()
 })
 
